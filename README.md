@@ -68,7 +68,8 @@ streamlit run app.py
 
 6. 查看回测结果：
    - 按市场分类查看超过50%收益率的股票
-![image](https://github.com/user-attachments/assets/a50328df-db3e-41f3-a8e6-b6518b6c6763)
+![image](https://github.com/user-attachments/assets/576f36d4-b8ba-48a5-947a-0dd67d19eb72)
+
 
 ## 日志系统
 
