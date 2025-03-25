@@ -1,0 +1,2 @@
+# foundit
+这是一个基于Streamlit开发的A股全市场回测系统，使用Tushare获取数据，Backtrader进行回测，实现了基于均线交叉的交易策略。应用该策略从A股全市场筛选高收益股票。
