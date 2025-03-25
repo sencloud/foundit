@@ -1,0 +1,7 @@
+streamlit
+tushare
+pandas
+numpy
+plotly
+backtrader
+loguru
