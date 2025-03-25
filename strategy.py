@@ -10,7 +10,7 @@ class MAStrategy(bt.Strategy):
         ('atr_period', 14),
         ('atr_loss_multiplier', 2.0),
         ('atr_profit_multiplier', 3.0),
-        ('enable_trailing_stop', True),
+        ('enable_trailing_stop', False),
         ('margin_ratio', 0.95),
     )
 

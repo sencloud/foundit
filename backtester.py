@@ -67,6 +67,9 @@ class StockBacktester:
         # 添加策略
         cerebro.addstrategy(MAStrategy)
         
+        # 添加分析器
+        cerebro.addanalyzer(bt.analyzers.TimeReturn, _name='returns')
+        
         # 运行回测
         logger.debug("开始执行回测策略")
         results = cerebro.run()
@@ -77,14 +80,44 @@ class StockBacktester:
         pnl = final_value - initial_cash
         return_pct = (final_value / initial_cash - 1) * 100
         
+        # 获取收益曲线数据
+        returns = strategy.analyzers.returns.get_analysis()
+        equity_curve = pd.Series(returns).cumsum()
+        equity_curve = (1 + equity_curve) * initial_cash
+        
         logger.info(f"回测完成 - 最终资金: {final_value:.2f}, 盈亏: {pnl:.2f}, 收益率: {return_pct:.2f}%")
         return {
             'initial_cash': initial_cash,
             'final_value': final_value,
             'pnl': pnl,
             'return_pct': return_pct,
-            'trades': strategy.trades
+            'trades': strategy.trades,
+            'equity_curve': equity_curve
         }
+        
+    def run_single_stock_backtest(self, stock_code, start_date, end_date, initial_cash=100000.0):
+        """运行单个股票的回测"""
+        logger.info(f"开始单股回测 - 股票代码: {stock_code}")
+        
+        try:
+            # 获取股票信息
+            stock_info = self.pro.stock_basic(ts_code=stock_code, fields='ts_code,symbol,name,area,industry,market').iloc[0]
+            
+            # 获取股票数据
+            data = self.get_stock_data(stock_code, start_date, end_date)
+            if data is None:
+                logger.error(f"获取股票 {stock_code} 数据失败")
+                return None
+                
+            # 运行回测
+            result = self.run_backtest(data, initial_cash)
+            result['stock_info'] = stock_info.to_dict()
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"单股回测失败: {str(e)}")
+            return None
         
     def run_market_backtest(self, start_date='20200101', end_date=None):
         """运行全市场回测"""
