@@ -68,6 +68,7 @@ streamlit run app.py
 
 6. 查看回测结果：
    - 按市场分类查看超过50%收益率的股票
+![image](https://github.com/user-attachments/assets/a50328df-db3e-41f3-a8e6-b6518b6c6763)
 
 ## 日志系统
 
@@ -102,3 +103,15 @@ streamlit run app.py
 - `strategy.py`: 交易策略实现
 - `logger_config.py`: 日志系统配置
 - `requirements.txt`: 项目依赖
+
+## 风险提示
+
+本系统仅供学习和研究使用，不构成任何投资建议。使用本系统进行实盘交易需要自行承担风险。
+
+## 贡献指南
+
+欢迎提交 Issue 和 Pull Request 来帮助改进这个项目。
+
+## 许可证
+
+MIT License
