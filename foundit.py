@@ -26,19 +26,57 @@ class StockFinder:
         return os.path.join(self.cache_dir, f"inflow_stocks_{days}days.csv")
         
     def is_cache_valid(self, cache_file):
-        """检查缓存是否有效（当天的缓存）"""
+        """检查缓存是否有效（当天的缓存且包含所需字段）"""
         if not os.path.exists(cache_file):
             return False
         
-        # 获取文件最后修改时间
-        mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
-        today = datetime.now()
+        try:
+            # 读取缓存文件
+            df = pd.read_csv(cache_file)
+            
+            # 检查必需的字段是否存在
+            required_fields = ['code', 'name', 'industry', 'total_inflow', 
+                             'avg_daily_inflow', 'inflow_ratio', 'holders_decreased', 
+                             'holder_change_desc']
+            if not all(field in df.columns for field in required_fields):
+                logger.info(f"缓存文件缺少必需字段，需要重新计算")
+                return False
+            
+            # 获取文件最后修改时间
+            mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
+            today = datetime.now()
+            
+            # 如果是当天的缓存则有效
+            return (mtime.year == today.year and 
+                    mtime.month == today.month and 
+                    mtime.day == today.day)
+                    
+        except Exception as e:
+            logger.error(f"读取缓存文件失败: {str(e)}")
+            return False
+
+    def update_cache_with_holder_info(self, df):
+        """更新DataFrame中的股东人数信息"""
+        logger.info("开始更新股东人数信息")
+        total_stocks = len(df)
+        updated_records = []
         
-        # 如果是当天的缓存则有效
-        return (mtime.year == today.year and 
-                mtime.month == today.month and 
-                mtime.day == today.day)
-        
+        for idx, row in df.iterrows():
+            if idx % 50 == 0:
+                logger.info(f"正在更新股东信息: {idx}/{total_stocks}")
+                
+            ts_code = row['code']
+            # 获取股东人数变动情况
+            holders_decreased, holder_change_desc = self._get_holder_number_change(ts_code)
+            
+            # 更新记录
+            record = row.to_dict()
+            record['holders_decreased'] = holders_decreased if holders_decreased is not None else False
+            record['holder_change_desc'] = holder_change_desc if holder_change_desc else "无最新变动数据"
+            updated_records.append(record)
+            
+        return pd.DataFrame(updated_records)
+
     def _check_rate_limit(self):
         """检查并控制API调用频率"""
         current_time = time.time()
@@ -93,6 +131,44 @@ class StockFinder:
             logger.error(f"获取{ts_code}资金流向数据失败: {str(e)}")
             return None
 
+    def _get_holder_number_change(self, ts_code):
+        """获取最近两期股东人数变动情况"""
+        try:
+            self._check_rate_limit()
+            # 获取最近的股东数据（默认按公告日期降序）
+            df = self.pro.stk_holdernumber(
+                ts_code=ts_code,
+                fields='ts_code,ann_date,end_date,holder_num'
+            )
+            
+            if df is None or df.empty or len(df) < 2:
+                return None, None
+                
+            # 获取最近两期的数据
+            latest = df.iloc[0]
+            previous = df.iloc[1]
+            
+            # 计算变动
+            change = latest['holder_num'] - previous['holder_num']
+            change_pct = (change / previous['holder_num']) * 100
+            
+            # 生成变动描述
+            if change < 0:
+                desc = f"减少{abs(change)}户({abs(change_pct):.2f}%)"
+                is_decreased = True
+            else:
+                desc = f"增加{change}户({change_pct:.2f}%)"
+                is_decreased = False
+                
+            # 添加日期信息
+            desc = f"{latest['end_date']}较{previous['end_date']}: {desc}"
+            
+            return is_decreased, desc
+                
+        except Exception as e:
+            logger.error(f"获取{ts_code}股东人数数据失败: {str(e)}")
+            return None, None
+
     def analyze_stock_inflow(self, ts_code, name, industry, start_date, end_date):
         """分析单只股票的资金流入情况"""
         flow_data = self._get_money_flow(ts_code, start_date, end_date)
@@ -113,6 +189,10 @@ class StockFinder:
         # 筛选条件
         if (inflow_days / total_days > 0.6) and (total_inflow > 0):
             avg_daily_inflow = total_inflow / total_days
+            
+            # 获取股东人数变动情况
+            holders_decreased, holder_change_desc = self._get_holder_number_change(ts_code)
+            
             return {
                 'code': ts_code,
                 'name': name,
@@ -122,6 +202,8 @@ class StockFinder:
                 'inflow_ratio': round(inflow_days / total_days * 100, 2),
                 'total_inflow': round(total_inflow / 10000, 2),  # 转换为亿元
                 'avg_daily_inflow': round(avg_daily_inflow / 10000, 2),  # 转换为亿元
+                'holders_decreased': holders_decreased if holders_decreased is not None else False,
+                'holder_change_desc': holder_change_desc if holder_change_desc else "无最新变动数据",
                 'reason': f"近{total_days}天资金净流入{inflow_days}天，累计净流入{round(total_inflow/10000, 2)}亿元"
             }
         return None
@@ -140,9 +222,26 @@ class StockFinder:
         cache_file = self.get_cache_file_path(days)
         
         # 检查缓存
-        if use_cache and self.is_cache_valid(cache_file):
-            logger.info(f"使用缓存数据: {cache_file}")
-            return pd.read_csv(cache_file)
+        if use_cache and os.path.exists(cache_file):
+            logger.info(f"发现缓存文件: {cache_file}")
+            df = pd.read_csv(cache_file)
+            
+            # 检查是否需要更新股东信息
+            if not all(field in df.columns for field in ['holders_decreased', 'holder_change_desc']):
+                logger.info("缓存文件缺少股东信息字段，开始更新...")
+                df = self.update_cache_with_holder_info(df)
+                # 保存更新后的缓存
+                df.to_csv(cache_file, index=False)
+                logger.info("股东信息更新完成，已保存到缓存")
+            elif not self.is_cache_valid(cache_file):
+                logger.info("缓存文件已过期，需要重新计算")
+                df = None
+            else:
+                logger.info("使用有效的缓存数据")
+                return df
+                
+            if df is not None:
+                return df
             
         # 获取当前日期
         today = pd.Timestamp.now()
@@ -155,7 +254,7 @@ class StockFinder:
             stocks = self._get_all_stocks()
             if stocks.empty:
                 logger.error("获取股票列表失败，退出查找")
-                return []
+                return pd.DataFrame()
         else:
             stocks = base_stocks
             
@@ -167,10 +266,12 @@ class StockFinder:
         start_time = time.time()
         
         for _, stock in stocks.iterrows():
-            ts_code = stock['code']
+            ts_code = stock['ts_code'] if 'ts_code' in stock else stock['code']
+            name = stock['name']
+            industry = stock['industry']
             processed_stocks += 1
             
-            if processed_stocks % 50 == 0:  # 每处理50只股票显示一次进度
+            if processed_stocks % 50 == 0:
                 elapsed_time = time.time() - start_time
                 avg_time_per_stock = elapsed_time / processed_stocks
                 remaining_stocks = total_stocks - processed_stocks
@@ -180,13 +281,13 @@ class StockFinder:
             
             # 分析股票
             result = self.analyze_stock_inflow(
-                ts_code, stock['name'], stock['industry'],
+                ts_code, name, industry,
                 start_date, end_date
             )
             
             if result:
                 results.append(result)
-                logger.info(f"找到符合条件的股票: {ts_code} {stock['name']} - "
+                logger.info(f"找到符合条件的股票: {ts_code} {name} - "
                           f"净流入{result['inflow_days']}/{result['total_days']}天, "
                           f"累计净流入{result['total_inflow']}亿元")
                 

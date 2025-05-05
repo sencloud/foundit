@@ -206,6 +206,7 @@ def main():
           1. 净流入天数超过总交易天数的60%
           2. 资金净流入总额为正
         - 第二步：对基础股票池进行多周期分析（5天、10天、90天、180天）
+        - 第三步：分析最近两期股东人数变动情况，标识出股东人数减少的股票
         - 结果按资金净流入金额从高到低排序
         - 使用缓存加速（当天有效）
         
@@ -246,12 +247,57 @@ def main():
                 for tab, (days, df) in zip(period_tabs, sorted(st.session_state.stock_discovery_results.items())):
                     with tab:
                         # 显示结果统计
-                        st.metric(f"{days}天资金持续流入股票数量", len(df))
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric(f"{days}天资金持续流入股票数量", len(df))
+                        with col2:
+                            if 'holders_decreased' in df.columns:
+                                decreased_count = len(df[df['holders_decreased']])
+                                st.metric("其中股东人数减少的股票数量", decreased_count)
                         
                         # 按资金流入总额排序并显示详细结果表格
                         if not df.empty and 'total_inflow' in df.columns:
                             df_sorted = df.sort_values('total_inflow', ascending=False)
-                            st.dataframe(df_sorted)
+                            
+                            # 高亮显示股东人数减少的股票
+                            if 'holders_decreased' in df_sorted.columns:
+                                def highlight_decreased_holders(row):
+                                    if row['holders_decreased']:
+                                        return ['background-color: #ffcdd2'] * len(row)
+                                    return [''] * len(row)
+                                
+                                # 调整显示的列
+                                display_columns = [
+                                    'code', 'name', 'industry', 'total_inflow', 
+                                    'avg_daily_inflow', 'inflow_ratio', 'holder_change_desc',
+                                    'holders_decreased'  # 添加这列用于高亮，但不显示
+                                ]
+                                df_display = df_sorted[display_columns].copy()
+                                df_display.columns = [
+                                    '股票代码', '股票名称', '行业', '累计净流入(亿)', 
+                                    '日均净流入(亿)', '净流入天数占比(%)', '股东人数变动',
+                                    'holders_decreased'  # 保留原列名
+                                ]
+                                
+                                # 先应用样式，再删除 holders_decreased 列
+                                styled_df = df_display.style.apply(highlight_decreased_holders, axis=1)
+                                df_display = df_display.drop(columns=['holders_decreased'])
+                                
+                                # 设置列宽度
+                                st.dataframe(
+                                    styled_df,
+                                    height=400,
+                                    column_config={
+                                        "股东人数变动": st.column_config.Column(
+                                            width=300,
+                                        ),
+                                        "行业": st.column_config.Column(
+                                            width=150,
+                                        )
+                                    }
+                                )
+                            else:
+                                st.dataframe(df_sorted)
             else:
                 # 显示结果统计
                 st.metric("找到的股票数量", len(df))
