@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 from backtester import StockBacktester
+from foundit import StockFinder
 from loguru import logger
 import logger_config  # 导入日志配置
 
@@ -18,13 +19,15 @@ if 'backtest_results' not in st.session_state:
     st.session_state.backtest_results = None
 if 'single_stock_result' not in st.session_state:
     st.session_state.single_stock_result = None
+if 'stock_discovery_results' not in st.session_state:
+    st.session_state.stock_discovery_results = None
 
 def main():
     logger.info("启动回测系统Web界面")
     st.title("A股全市场回测系统")
     
     # 创建主要tab
-    main_tabs = st.tabs(["全市场回测", "单股回测"])
+    main_tabs = st.tabs(["全市场回测", "单股回测", "找股"])
     
     with main_tabs[0]:  # 全市场回测tab
         # Tushare Token输入
@@ -189,6 +192,76 @@ def main():
                         showlegend=True
                     )
                     st.plotly_chart(fig, use_container_width=True)
+
+    with main_tabs[2]:  # 找股tab
+        # Tushare Token输入
+        ts_token_discovery = st.text_input("请输入Tushare Token:", type="password", key="discovery_token")
+        
+        # 策略说明
+        st.markdown("""
+        ### 策略说明
+        
+        #### 资金持续流入
+        - 第一步：筛选最近60天资金持续流入的股票作为基础股票池
+          1. 净流入天数超过总交易天数的60%
+          2. 资金净流入总额为正
+        - 第二步：对基础股票池进行多周期分析（5天、10天、90天、180天）
+        - 结果按资金净流入金额从高到低排序
+        - 使用缓存加速（当天有效）
+        
+        #### 突破新高（开发中）
+        - 即将推出
+        
+        #### 量价齐升（开发中）
+        - 即将推出
+        
+        #### 机构重仓（开发中）
+        - 即将推出
+        """)
+        
+        # 找股策略选择
+        strategy = st.selectbox(
+            "选择找股策略",
+            ["资金持续流入", "突破新高", "量价齐升", "机构重仓"],
+            index=0
+        )
+        
+        # 运行找股按钮
+        if st.button("开始找股", key="discover_stocks") and ts_token_discovery:
+            logger.info(f"开始找股 - 策略: {strategy}")
+            with st.spinner('正在寻找符合条件的股票...'):
+                finder = StockFinder(ts_token_discovery)
+                st.session_state.stock_discovery_results = finder.find_stocks(strategy)
+                logger.info("找股完成")
+                st.success('找股完成！')
+        
+        # 显示找股结果
+        if st.session_state.stock_discovery_results:
+            logger.info("显示找股结果")
+            
+            if isinstance(st.session_state.stock_discovery_results, dict):
+                # 创建不同周期的tab
+                period_tabs = st.tabs([f"{days}天" for days in sorted(st.session_state.stock_discovery_results.keys())])
+                
+                for tab, (days, df) in zip(period_tabs, sorted(st.session_state.stock_discovery_results.items())):
+                    with tab:
+                        # 显示结果统计
+                        st.metric(f"{days}天资金持续流入股票数量", len(df))
+                        
+                        # 按资金流入总额排序并显示详细结果表格
+                        if not df.empty and 'total_inflow' in df.columns:
+                            df_sorted = df.sort_values('total_inflow', ascending=False)
+                            st.dataframe(df_sorted)
+            else:
+                # 显示结果统计
+                st.metric("找到的股票数量", len(df))
+                
+                # 按资金流入总额排序并显示详细结果表格
+                if not df.empty and 'total_inflow' in df.columns:
+                    df_sorted = df.sort_values('total_inflow', ascending=False)
+                    st.dataframe(df_sorted)
+                else:
+                    st.dataframe(df)
 
 if __name__ == "__main__":
     main() 
